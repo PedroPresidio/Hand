@@ -24,10 +24,76 @@ a:hover {
 
 body {
   margin: 0;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
+}
+
+#control-panel {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  width: 390px;
+  padding: 16px;
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  border-radius: 12px;
+  z-index: 10;
+}
+
+#control-panel h2 {
+  margin: 0 0 8px 0;
+  font-size: 22px;
+}
+
+#control-panel p{
+  margin: 0 0 12px 0;
+  color: #d8d8d8;
+  line-height: 1.4;
+}
+
+.info-block {
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.control-row label,
+.slider-row label {
+  width: 60px;
+}
+
+.control-row select {
+  flex: 1;
+}
+
+.slider-row input[type='range'] {
+  flex: 1;
+}
+
+.value {
+  width: 40px;
+  text-align: right;
+  color: #61dafb;
+}
+
+.button-row {
   display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.button-row button {
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+#notes {
+  margin-top: 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #d8d8d8;
 }
 
 h1 {
