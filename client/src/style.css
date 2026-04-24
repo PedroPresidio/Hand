@@ -51,21 +51,33 @@ body {
   line-height: 1.4;
 }
 
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;;
+}
+
+.slider-row label {
+  width: 60px;
+}
+
+.slider-row input[type='range'] {
+  flex: 1;
+}
+
+.value {
+  width: 40px;
+  text-align: right;
+  color: #61dafb
+}
 .info-block {
   margin-bottom: 12px;
   line-height: 1.5;
 }
 
 .control-row label,
-.slider-row label {
-  width: 60px;
-}
-
 .control-row select {
-  flex: 1;
-}
-
-.slider-row input[type='range'] {
   flex: 1;
 }
 
@@ -94,6 +106,9 @@ body {
   font-size: 14px;
   line-height: 1.5;
   color: #d8d8d8;
+}
+code {
+  color: #9fe6ff
 }
 
 h1 {

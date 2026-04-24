@@ -3,12 +3,15 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
-// =====================================================
-// Scene setup
-// =====================================================
+// =========================================
+// Scene
+// =========================================
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x1e1e1e);
 
+// =========================================
+// Camera
+// =========================================
 const camera = new THREE.PerspectiveCamera(
   75,
   window.innerWidth / window.innerHeight,
@@ -16,14 +19,18 @@ const camera = new THREE.PerspectiveCamera(
   1000
 );
 camera.position.set(0, 1.5, 8);
+
+// =========================================
+// Renderer
+// =========================================
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
 document.body.appendChild(renderer.domElement);
 
-// =====================================================
-// Orbit controls
-// =====================================================
+// =========================================
+// Orbit Controls
+// =========================================
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
@@ -32,14 +39,14 @@ controls.minDistance = 2;
 controls.maxDistance = 15;
 controls.update();
 
-// =====================================================
-// Lights / helpers
-// =====================================================
+// =========================================
+// Lighting
+// =========================================
 scene.add(new THREE.AmbientLight(0xffffff, 1.4));
 
-const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.0);
-dirLight1.position.set(5, 6, 5);
-scene.add(dirLight1);
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+dirLight.position.set(5, 6, 5);
+scene.add(dirLight);
 
 const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.6);
 dirLight2.position.set(-5, 4, -3);
@@ -48,25 +55,57 @@ scene.add(dirLight2);
 scene.add(new THREE.GridHelper(10, 10));
 scene.add(new THREE.AxesHelper(2));
 
-// =====================================================
-// Globals
-// =====================================================
+// =========================================
+// Global state
+// =========================================
 let handModel = null;
-let testNodes = [];
-let currentNodeIndex = 0;
-let currentNode = null;
-let currentNodeHelper = null;
 
-const originalRotations = new Map();
 const state = {
-  angle: 0,
-  axis: 'x',
-  filter: 'all',
+  thumb: 0,
+  index: 0,
+  middle: 0,
+  ring: 0,
+  pinky: 0
 };
 
-// =====================================================
+const fingerNodeNames = {
+  thumb: 'Contr_Fin_Tumb_03_01',
+  index: 'Fin_Index_03_01',
+  middle: 'Fin_Middle_03_03',
+  ring: 'Fin_Ring_03_06',
+  pinky: 'Fig_Pinky_03_06'
+};
+
+const fingerNodes = {
+  thumb: null,
+  index: null,
+  middle: null,
+  ring: null,
+  pinky: null
+};
+
+const fingerAxes = {
+  thumb: 'x',
+  index: 'y',
+  middle: 'y',
+  ring: 'y',
+  pinky: 'y'
+};
+
+// Start with negative direction. Flip any one that bends the wrong way.
+const fingerSigns = {
+  thumb: -1,
+  index: -1,
+  middle: -1,
+  ring: -1,
+  pinky: -1
+};
+
+const sliderRefs = {};
+
+// =========================================
 // Helpers
-// =====================================================
+// =========================================
 function autoScaleAndCenter(object, targetSize = 4) {
   const box = new THREE.Box3().setFromObject(object);
   const size = box.getSize(new THREE.Vector3());
@@ -92,348 +131,202 @@ function autoScaleAndCenter(object, targetSize = 4) {
   object.position.y += finalSize.y / 2;
 }
 
-function isBoneLikeNode(child) {
-  const name = (child.name || '').toLowerCase();
+function findNodeByExactName(root, name) {
+  let found = null;
 
-  return (
-    name.startsWith('bone_') ||
-    name.startsWith('contr_') ||
-    name.includes('tumb') ||
-    name.includes('thumb') ||
-    name.includes('index') ||
-    name.includes('middle') ||
-    name.includes('ring') ||
-    name.includes('pinky') ||
-    name.includes('palm')
-  );
-}
-
-function collectTestNodes(model) {
-  const result = [];
-
-  model.traverse((child) => {
-    if (isBoneLikeNode(child)) {
-      result.push(child);
+  root.traverse((child) => {
+    if (child.name === name) {
+      found = child;
     }
   });
 
-  return result;
+  return found;
 }
 
-function saveOriginalRotation(node) {
-  if (!node || originalRotations.has(node.uuid)) return;
-  originalRotations.set(node.uuid, node.rotation.clone());
+function mapFingerNodes(model) {
+  for (const finger of Object.keys(fingerNodeNames)) {
+    const nodeName = fingerNodeNames[finger];
+    fingerNodes[finger] = findNodeByExactName(model, nodeName);
+  }
+
+  console.log('========== PHASE 2 NODE MAP ==========');
+  for (const finger of Object.keys(fingerNodes)) {
+    console.log(finger.toUpperCase(), '=>', fingerNodes[finger]?.name || 'NOT FOUND');
+  }
+  console.log('======================================');
 }
 
-function restoreOriginalRotation(node) {
+function applyFingerRotation(fingerName, angleDegrees) {
+  const node = fingerNodes[fingerName];
   if (!node) return;
-  const rot = originalRotations.get(node.uuid);
-  if (!rot) return;
-  node.rotation.copy(rot);
+
+  const axis = fingerAxes[fingerName];
+  const sign = fingerSigns[fingerName];
+
+  node.rotation[axis] = sign * THREE.MathUtils.degToRad(angleDegrees);
 }
 
-function restoreAllRotations() {
-  testNodes.forEach((node) => restoreOriginalRotation(node));
+function updateModelFromState() {
+  applyFingerRotation('thumb', state.thumb);
+  applyFingerRotation('index', state.index);
+  applyFingerRotation('middle', state.middle);
+  applyFingerRotation('ring', state.ring);
+  applyFingerRotation('pinky', state.pinky);
 }
 
-function printNodes(nodes) {
-  console.log('========== TEST NODES ==========');
-  nodes.forEach((node, i) => {
-    console.log(`${i}: ${node.name} [${node.type}]`);
-  });
-  console.log('================================');
-}
-function nodeMatchesFilter(node, filter) {
-  const name = (node.name || '').toLowerCase();
+function setFingerValue(key, value) {
+  state[key] = value;
 
-  if (filter === 'all') return true;
-  if (filter === 'thumb') return name.includes('tumb') || name.includes('thumb');
-  if (filter === 'index') return name.includes('index');
-  if (filter === 'middle') return name.includes('middle');
-  if (filter === 'ring') return name.includes('ring');
-  if (filter === 'pinky') return name.includes('pinky');
-
-  return true;
-}
-
-function getFilteredNodes() {
-  return testNodes.filter((node) => nodeMatchesFilter(node, state.filter));
-}
-
-function clearCurrentHelper() {
-  if (currentNodeHelper && currentNode) {
-    currentNode.remove(currentNodeHelper);
-    currentNodeHelper = null;
+  if (sliderRefs[key]) {
+    sliderRefs[key].slider.value = String(value);
+    sliderRefs[key].valueEl.textContent = String(value);
   }
 }
 
-function addCurrentHelper(node) {
-  clearCurrentHelper();
-  if (!node) return;
+function syncModel() {
+  updateModelFromState();
+}
 
-  const helper = new THREE.AxesHelper(0.35);
+function addAxisHelperToNode(node, size = 0.2) {
+  if (!node) return;
+  const helper = new THREE.AxesHelper(size);
   node.add(helper);
-  currentNodeHelper = helper;
 }
 
-function updateCurrentNode() {
-  const filtered = getFilteredNodes();
-
-  if (filtered.length === 0) {
-    currentNode = null;
-    nodeNameEl.textContent = 'None found';
-    nodeIndexEl.textContent = '0 / 0';
-    return;
-  }
-  currentNodeIndex =
-    ((currentNodeIndex % filtered.length) + filtered.length) % filtered.length;
-
-  currentNode = filtered[currentNodeIndex];
-
-  nodeNameEl.textContent = currentNode.name;
-  nodeIndexEl.textContent = `${currentNodeIndex + 1} / ${filtered.length}`;
-
-  addCurrentHelper(currentNode);
-  applyCurrentRotation();
+function printCurrentMappings() {
+  console.log('========== CURRENT MAPPINGS ==========');
+  console.log('Thumb  -> Contr_Fin_Tumb_03_01 on X');
+  console.log('Index  -> Fin_Index_03_01 on Y');
+  console.log('Middle -> Fin_Middle_03_03 on Y');
+  console.log('Ring   -> Fin_Ring_03_06 on Y');
+  console.log('Pinky  -> Fig_Pinky_03_06 on Y');
+  console.log('======================================');
 }
 
-function applyCurrentRotation() {
-  restoreAllRotations();
+// =========================================
+// UI
+// =========================================
+function createSliderRow(label, key) {
+  const row = document.createElement('div');
+  row.className = 'slider-row';
 
-  if (!currentNode) return;
+  const labelEl = document.createElement('label');
+  labelEl.textContent = `${label}:`;
 
-  const radians = THREE.MathUtils.degToRad(state.angle);
-  currentNode.rotation[state.axis] += radians;
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = '0';
+  slider.max = '90';
+  slider.value = '0';
+
+  const valueEl = document.createElement('span');
+  valueEl.className = 'value';
+  valueEl.textContent = '0';
+
+  slider.addEventListener('input', () => {
+    state[key] = Number(slider.value);
+    valueEl.textContent = slider.value;
+    updateModelFromState();
+  });
+
+  row.appendChild(labelEl);
+  row.appendChild(slider);
+  row.appendChild(valueEl);
+
+  sliderRefs[key] = { slider, valueEl };
+  return row;
 }
 
-function nextNode() {
-  currentNodeIndex++;
-  updateCurrentNode();
-}
+function buildUI() {
+  const panel = document.createElement('div');
+  panel.id = 'control-panel';
 
-function previousNode() {
-  currentNodeIndex--;
-  updateCurrentNode();
-}
+  const title = document.createElement('h2');
+  title.textContent = 'Phase 2: Finger Sliders';
+  panel.appendChild(title);
 
-function categorizeNode(name) {
-  const lower = (name || '').toLowerCase();
+  const desc = document.createElement('p');
+  desc.textContent =
+    'This phase moves the mapped 3D finger nodes. Thumb is on X. Index, middle, ring, and pinky are on Y.';
+  panel.appendChild(desc);
 
-  if (lower.includes('tumb') || lower.includes('thumb')) return 'thumb';
-  if (lower.includes('index')) return 'index';
-  if (lower.includes('middle')) return 'middle';
-  if (lower.includes('ring')) return 'ring';
-  if (lower.includes('pinky')) return 'pinky';
-  if (lower.includes('palm')) return 'palm';
-  if (lower.startsWith('contr_')) return 'controller';
-  if (lower.startsWith('bone_')) return 'bone-like';
+  panel.appendChild(createSliderRow('Thumb', 'thumb'));
+  panel.appendChild(createSliderRow('Index', 'index'));
+  panel.appendChild(createSliderRow('Middle', 'middle'));
+  panel.appendChild(createSliderRow('Ring', 'ring'));
+  panel.appendChild(createSliderRow('Pinky', 'pinky'));
 
-  return 'other';
-}
+  const buttonRow = document.createElement('div');
+  buttonRow.className = 'button-row';
 
-function printSummary() {
-  const groups = {
-    thumb: [],
-    index: [],
-    middle: [],
-    ring: [],
-    pinky: [],
-    palm: [],
-    controller: [],
-    'bone-like': [],
-    other: [],
+  const openBtn = document.createElement('button');
+  openBtn.textContent = 'Open Hand';
+  openBtn.onclick = () => {
+    setFingerValue('thumb', 0);
+    setFingerValue('index', 0);
+    setFingerValue('middle', 0);
+    setFingerValue('ring', 0);
+    setFingerValue('pinky', 0);
+    syncModel();
   };
 
-  testNodes.forEach((node) => {
-    groups[categorizeNode(node.name)].push(node.name);
-  });
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = 'Close Hand';
+  closeBtn.onclick = () => {
+    setFingerValue('thumb', 45);
+    setFingerValue('index', 45);
+    setFingerValue('middle', 45);
+    setFingerValue('ring', 45);
+    setFingerValue('pinky', 45);
+    syncModel();
+  };
 
-  console.log('========== NODE SUMMARY ==========');
-  Object.entries(groups).forEach(([group, names]) => {
-    console.log(`\n${group.toUpperCase()}:`);
-    names.forEach((name) => console.log('  ', name));
-  });
-  console.log('==================================');
+  const pointBtn = document.createElement('button');
+  pointBtn.textContent = 'Point';
+  pointBtn.onclick = () => {
+    setFingerValue('thumb', 20);
+    setFingerValue('index', 0);
+    setFingerValue('middle', 45);
+    setFingerValue('ring', 45);
+    setFingerValue('pinky', 45);
+    syncModel();
+  };
+
+  buttonRow.appendChild(openBtn);
+  buttonRow.appendChild(closeBtn);
+  buttonRow.appendChild(pointBtn);
+  panel.appendChild(buttonRow);
+
+  const debugRow = document.createElement('div');
+  debugRow.className = 'button-row';
+
+  const printBtn = document.createElement('button');
+  printBtn.textContent = 'Print Mappings';
+  printBtn.onclick = printCurrentMappings;
+
+  debugRow.appendChild(printBtn);
+  panel.appendChild(debugRow);
+
+  const notes = document.createElement('div');
+  notes.id = 'notes';
+  notes.innerHTML = `
+    <strong>Mapped nodes</strong><br>
+    Thumb → <code>Contr_Fin_Tumb_03_01</code> on X<br>
+    Index → <code>Fin_Index_03_01</code> on Y<br>
+    Middle → <code>Fin_Middle_03_03</code> on Y<br>
+    Ring → <code>Fin_Ring_03_06</code> on Y<br>
+    Pinky → <code>Fig_Pinky_03_06</code> on Y
+  `;
+  panel.appendChild(notes);
+
+  document.body.appendChild(panel);
 }
 
-// =====================================================
-// UI
-// =====================================================
-const panel = document.createElement('div');
-panel.id = 'control-panel';
+buildUI();
 
-const title = document.createElement('h2');
-title.textContent = 'Node/Bone Tester';
-panel.appendChild(title);
-
-const desc = document.createElement('p');
-desc.innerHTML =
-'This version tests <strong>bone-like named nodes</strong>, not only <code>isBone</code> objects.';
-panel.appendChild(desc);
-
-const info = document.createElement('div');
-info.className = 'info-block';
-
-const nameRow = document.createElement('div');
-nameRow.innerHTML = '<strong>Current Node:</strong> ';
-const nodeNameEl = document.createElement('span');
-nodeNameEl.textContent = 'Not loaded';
-nameRow.appendChild(nodeNameEl);
-
-const indexRow = document.createElement('div');
-indexRow.innerHTML = '<strong>Index:</strong> ';
-const nodeIndexEl = document.createElement('span');
-nodeIndexEl.textContent = '0 / 0';
-indexRow.appendChild(nodeIndexEl);
-
-info.appendChild(nameRow);
-info.appendChild(indexRow);
-panel.appendChild(info);
-
-// Filter
-const filterRow = document.createElement('div');
-filterRow.className = 'control-row';
-
-const filterLabel = document.createElement('label');
-filterLabel.textContent = 'Filter:';
-
-const filterSelect = document.createElement('select');
-['all', 'thumb', 'index', 'middle', 'ring', 'pinky'].forEach((value) => {
-  const option = document.createElement('option');
-  option.value = value;
-  option.textContent = value;
-  filterSelect.appendChild(option);
-});
-
-filterSelect.addEventListener('change', () => {
-  state.filter = filterSelect.value;
-  currentNodeIndex = 0;
-  updateCurrentNode();
-});
-filterRow.appendChild(filterLabel);
-filterRow.appendChild(filterSelect);
-panel.appendChild(filterRow);
-
-// Axis
-const axisRow = document.createElement('div');
-axisRow.className = 'control-row';
-
-const axisLabel = document.createElement('label');
-axisLabel.textContent = 'Axis:';
-
-const axisSelect = document.createElement('select');
-['x', 'y', 'z'].forEach((value) => {
-  const option = document.createElement('option');
-  option.value = value;
-  option.textContent = value.toUpperCase();
-  axisSelect.appendChild(option);
-});
-
-axisSelect.addEventListener('change', () => {
-  state.axis = axisSelect.value;
-  applyCurrentRotation();
-});
-
-axisRow.appendChild(axisLabel);
-axisRow.appendChild(axisSelect);
-panel.appendChild(axisRow);
-
-// Angle slider
-const angleRow = document.createElement('div');
-angleRow.className = 'slider-row';
-
-const angleLabel = document.createElement('label');
-angleLabel.textContent = 'Angle:';
-
-const angleSlider = document.createElement('input');
-angleSlider.type = 'range';
-angleSlider.min = '-90';
-angleSlider.max = '90';
-angleSlider.value = '0';
-const angleValue = document.createElement('span');
-angleValue.className = 'value';
-angleValue.textContent = '0';
-
-angleSlider.addEventListener('input', () => {
-  state.angle = Number(angleSlider.value);
-  angleValue.textContent = angleSlider.value;
-  applyCurrentRotation();
-});
-
-angleRow.appendChild(angleLabel);
-angleRow.appendChild(angleSlider);
-angleRow.appendChild(angleValue);
-panel.appendChild(angleRow);
-
-// Buttons
-const row1 = document.createElement('div');
-row1.className = 'button-row';
-
-const prevBtn = document.createElement('button');
-prevBtn.textContent = 'Previous';
-prevBtn.onclick = previousNode;
-
-const nextBtn = document.createElement('button');
-nextBtn.textContent = 'Next';
-nextBtn.onclick = nextNode;
-
-row1.appendChild(prevBtn);
-row1.appendChild(nextBtn);
-panel.appendChild(row1);
-
-const row2 = document.createElement('div');
-row2.className = 'button-row';
-
-const resetAngleBtn = document.createElement('button');
-resetAngleBtn.textContent = 'Reset Angle';
-resetAngleBtn.onclick = () => {
-  state.angle = 0;
-  angleSlider.value = '0';
-  angleValue.textContent = '0';
-  applyCurrentRotation();
-};
-const resetAllBtn = document.createElement('button');
-resetAllBtn.textContent = 'Reset All';
-resetAllBtn.onclick = () => {
-  state.angle = 0;
-  angleSlider.value = '0';
-  angleValue.textContent = '0';
-  restoreAllRotations();
-  updateCurrentNode();
-};
-
-row2.appendChild(resetAngleBtn);
-row2.appendChild(resetAllBtn);
-panel.appendChild(row2);
-
-const row3 = document.createElement('div');
-row3.className = 'button-row';
-
-const printBtn = document.createElement('button');
-printBtn.textContent = 'Print Nodes';
-printBtn.onclick = () => printNodes(testNodes);
-
-const summaryBtn = document.createElement('button');
-summaryBtn.textContent = 'Print Summary';
-summaryBtn.onclick = () => printSummary();
-
-row3.appendChild(printBtn);
-row3.appendChild(summaryBtn);
-panel.appendChild(row3);
-
-const notes = document.createElement('div');
-notes.id = 'notes';
-notes.innerHTML = `
-  <strong>Tip</strong><br>
-  Start with filter = <em>thumb</em>. If the node moves the thumb correctly, write down:
-  node name, axis, and angle direction.
-`;
-panel.appendChild(notes);
-
-document.body.appendChild(panel);
-// =====================================================
-// Load model
-// =====================================================
+// =========================================
+// Load Model
+// =========================================
 const loader = new GLTFLoader();
 
 loader.load(
@@ -444,19 +337,21 @@ loader.load(
     scene.add(handModel);
 
     autoScaleAndCenter(handModel, 4);
+    mapFingerNodes(handModel);
 
-    testNodes = collectTestNodes(handModel);
-    testNodes.forEach(saveOriginalRotation);
+    addAxisHelperToNode(fingerNodes.thumb, 0.2);
+    addAxisHelperToNode(fingerNodes.index, 0.2);
+    addAxisHelperToNode(fingerNodes.middle, 0.2);
+    addAxisHelperToNode(fingerNodes.ring, 0.2);
+    addAxisHelperToNode(fingerNodes.pinky, 0.2);
 
-    console.log('Model loaded.');
-    printNodes(testNodes);
-    printSummary();
+    updateModelFromState();
 
     window.handModel = handModel;
-    window.testNodes = testNodes;
-    window.currentNode = () => currentNode;
+    window.fingerNodes = fingerNodes;
+    window.state = state;
 
-    updateCurrentNode();
+    printCurrentMappings();
   },
   undefined,
   (error) => {
@@ -464,42 +359,18 @@ loader.load(
   }
 );
 
-// =====================================================
-// Keyboard shortcuts
-// =====================================================
-window.addEventListener('keydown', (event) => {
-  if (event.key === 'ArrowRight') nextNode();
-  if (event.key === 'ArrowLeft') previousNode();
-
-  if (event.key.toLowerCase() === 'x') {
-    state.axis = 'x';
-    axisSelect.value = 'x';
-    applyCurrentRotation();
-  }
-  if (event.key.toLowerCase() === 'y') {
-    state.axis = 'y';
-    axisSelect.value = 'y';
-    applyCurrentRotation();
-  }
-  if (event.key.toLowerCase() === 'z') {
-    state.axis = 'z';
-    axisSelect.value = 'z';
-    applyCurrentRotation();
-  }
-});
-
-// =====================================================
+// =========================================
 // Resize
-// =====================================================
+// =========================================
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// =====================================================
+// =========================================
 // Animate
-// =====================================================
+// =========================================
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
