@@ -92,13 +92,13 @@ const fingerAxes = {
   pinky: 'y'
 };
 
-// Start with negative direction. Flip any one that bends the wrong way.
+// Flip any one if it bends the wrong way
 const fingerSigns = {
-  thumb: -1,
-  index: -1,
-  middle: -1,
-  ring: -1,
-  pinky: -1
+  thumb: 1,
+  index: 1,
+  middle: 1,
+  ring: 1,
+  pinky: 1
 };
 
 const sliderRefs = {};
@@ -149,7 +149,7 @@ function mapFingerNodes(model) {
     fingerNodes[finger] = findNodeByExactName(model, nodeName);
   }
 
-  console.log('========== PHASE 2 NODE MAP ==========');
+  console.log('========== PHASE 3 NODE MAP ==========');
   for (const finger of Object.keys(fingerNodes)) {
     console.log(finger.toUpperCase(), '=>', fingerNodes[finger]?.name || 'NOT FOUND');
   }
@@ -174,6 +174,30 @@ function updateModelFromState() {
   applyFingerRotation('pinky', state.pinky);
 }
 
+async function sendHandToArduino() {
+  try {
+    const response = await fetch('http://localhost:3000/hand', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state)
+    });
+
+    const result = await response.json();
+    console.log('Server response:', result);
+  } catch (error) {
+    console.error('Error sending to Arduino:', error);
+  }
+}
+
+let sendTimeout = null;
+
+function queueSendToArduino() {
+  clearTimeout(sendTimeout);
+  sendTimeout = setTimeout(() => {
+    sendHandToArduino();
+  }, 80);
+}
+
 function setFingerValue(key, value) {
   state[key] = value;
 
@@ -183,24 +207,15 @@ function setFingerValue(key, value) {
   }
 }
 
-function syncModel() {
+function syncAll() {
   updateModelFromState();
+  queueSendToArduino();
 }
 
 function addAxisHelperToNode(node, size = 0.2) {
   if (!node) return;
   const helper = new THREE.AxesHelper(size);
   node.add(helper);
-}
-
-function printCurrentMappings() {
-  console.log('========== CURRENT MAPPINGS ==========');
-  console.log('Thumb  -> Contr_Fin_Tumb_03_01 on X');
-  console.log('Index  -> Fin_Index_03_01 on Y');
-  console.log('Middle -> Fin_Middle_03_03 on Y');
-  console.log('Ring   -> Fin_Ring_03_06 on Y');
-  console.log('Pinky  -> Fig_Pinky_03_06 on Y');
-  console.log('======================================');
 }
 
 // =========================================
@@ -227,6 +242,7 @@ function createSliderRow(label, key) {
     state[key] = Number(slider.value);
     valueEl.textContent = slider.value;
     updateModelFromState();
+    queueSendToArduino();
   });
 
   row.appendChild(labelEl);
@@ -242,12 +258,12 @@ function buildUI() {
   panel.id = 'control-panel';
 
   const title = document.createElement('h2');
-  title.textContent = 'Phase 2: Finger Sliders';
+  title.textContent = 'Phase 3: Digital / Physical Hand';
   panel.appendChild(title);
 
   const desc = document.createElement('p');
   desc.textContent =
-    'This phase moves the mapped 3D finger nodes. Thumb is on X. Index, middle, ring, and pinky are on Y.';
+    'Move the sliders to control both the 3D robot hand and the Arduino servo hand.';
   panel.appendChild(desc);
 
   panel.appendChild(createSliderRow('Thumb', 'thumb'));
@@ -260,25 +276,25 @@ function buildUI() {
   buttonRow.className = 'button-row';
 
   const openBtn = document.createElement('button');
-  openBtn.textContent = 'Open Hand';
+  openBtn.textContent = 'Close Hand';
   openBtn.onclick = () => {
     setFingerValue('thumb', 0);
     setFingerValue('index', 0);
     setFingerValue('middle', 0);
     setFingerValue('ring', 0);
     setFingerValue('pinky', 0);
-    syncModel();
+    syncAll();
   };
 
   const closeBtn = document.createElement('button');
-  closeBtn.textContent = 'Close Hand';
+  closeBtn.textContent = 'Open Hand';
   closeBtn.onclick = () => {
     setFingerValue('thumb', 45);
     setFingerValue('index', 45);
     setFingerValue('middle', 45);
     setFingerValue('ring', 45);
     setFingerValue('pinky', 45);
-    syncModel();
+    syncAll();
   };
 
   const pointBtn = document.createElement('button');
@@ -289,23 +305,13 @@ function buildUI() {
     setFingerValue('middle', 45);
     setFingerValue('ring', 45);
     setFingerValue('pinky', 45);
-    syncModel();
+    syncAll();
   };
 
   buttonRow.appendChild(openBtn);
   buttonRow.appendChild(closeBtn);
   buttonRow.appendChild(pointBtn);
   panel.appendChild(buttonRow);
-
-  const debugRow = document.createElement('div');
-  debugRow.className = 'button-row';
-
-  const printBtn = document.createElement('button');
-  printBtn.textContent = 'Print Mappings';
-  printBtn.onclick = printCurrentMappings;
-
-  debugRow.appendChild(printBtn);
-  panel.appendChild(debugRow);
 
   const notes = document.createElement('div');
   notes.id = 'notes';
@@ -333,7 +339,7 @@ loader.load(
   '/models/robot_hand/robot_hand.gltf',
   (gltf) => {
     handModel = gltf.scene;
-    handModel.rotation.z = Math.PI;
+    handModel.rotation.z = 0;
     scene.add(handModel);
 
     autoScaleAndCenter(handModel, 4);
@@ -350,8 +356,6 @@ loader.load(
     window.handModel = handModel;
     window.fingerNodes = fingerNodes;
     window.state = state;
-
-    printCurrentMappings();
   },
   undefined,
   (error) => {
