@@ -103,6 +103,8 @@ const fingerSigns = {
 
 const sliderRefs = {};
 
+let lastTrigger = 0;
+
 // =========================================
 // Helpers
 // =========================================
@@ -218,6 +220,28 @@ function addAxisHelperToNode(node, size = 0.2) {
   node.add(helper);
 }
 
+function randomGesture() {
+  const gestures = [
+    { thumb: 0, index: 0, middle: 0, ring: 0, pinky: 0 },
+    { thumb: 90, index: 90, middle: 90, ring: 90, pinky: 90 },
+    { thumb: 0, index: 90, middle: 90, ring: 0, pinky: 0 }
+  ];
+  const g = gestures[Math.floor(Math.random() * gestures.length)];
+  Object.keys(g).forEach(key => setFingerValue(key, g[key]));
+  syncAll();
+}
+
+async function checkDistance() {
+  try {
+    const res = await fetch('http://localhost:3000/distance');
+    const data = await res.json();
+    if (data.distance < 40 && Date.now() - lastTrigger > 1500) {
+      lastTrigger = Date.now();
+      randomGesture();
+    }
+  } catch (e) {}
+}
+
 // =========================================
 // UI
 // =========================================
@@ -308,9 +332,17 @@ function buildUI() {
     syncAll();
   };
 
+  const testBtn = document.createElement('button');
+  testBtn.textContent = '🎮 Test Gesture';
+  testBtn.style.backgroundColor = '#ff6b6b';
+  testBtn.onclick = () => {
+    randomGesture();
+  };
+
   buttonRow.appendChild(openBtn);
   buttonRow.appendChild(closeBtn);
   buttonRow.appendChild(pointBtn);
+  buttonRow.appendChild(testBtn);
   panel.appendChild(buttonRow);
 
   const notes = document.createElement('div');
@@ -352,6 +384,7 @@ loader.load(
     addAxisHelperToNode(fingerNodes.pinky, 0.2);
 
     updateModelFromState();
+    setInterval(checkDistance, 200);
 
     window.handModel = handModel;
     window.fingerNodes = fingerNodes;

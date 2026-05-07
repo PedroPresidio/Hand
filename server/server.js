@@ -16,7 +16,8 @@ app.use(cors());
 app.use(express.json());
  
 let port;
- 
+let distance = 999;
+
 try {
   port = new SerialPort({
     path: SERIAL_PORT,
@@ -28,7 +29,18 @@ try {
   });
  
   port.on('data', (data) => {
-    console.log('Arduino:', data.toString());
+    const message = data.toString().trim();
+    console.log('Arduino:', message);
+    
+    // Parse distance from Arduino: "DISTANCE:45"
+    if (message.startsWith('DISTANCE:')) {
+      const distanceStr = message.split(':')[1];
+      const distanceValue = parseInt(distanceStr, 10);
+      if (!isNaN(distanceValue)) {
+        distance = distanceValue;
+        console.log(`Distance: ${distance} cm`);
+      }
+    }
   });
  
   port.on('error', (err) => {
@@ -45,7 +57,17 @@ app.get('/status', (req, res) => {
     serialOpen: port ? port.isOpen : false,
   });
 });
- 
+
+app.get('/distance', (req, res) => {
+  res.json({ distance });
+});
+
+app.post('/distance', (req, res) => {
+  distance = req.body.distance || 999;
+  console.log(`Distance updated: ${distance} cm`);
+  res.json({ ok: true });
+});
+
 app.post('/hand', (req, res) => {
   const {
     thumb = 0,
